@@ -1,0 +1,42 @@
+# Render Blueprint — deploy Nile as a Node Web Service.
+# Push this repo to GitHub, then in Render: "New -> Blueprint" and import the
+# repo. Render will read this file and provision the service automatically.
+#
+# Secrets are marked `sync: false` so Render asks for them in the dashboard
+# instead of storing them in this (committed) file.
+services:
+  - type: web
+    name: nile
+    runtime: node
+    plan: free
+    buildCommand: npm run build
+    startCommand: npx next start -p $PORT
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: NODE_ENV
+        value: production
+      # --- Fill these in Render (Project -> Environment) ---
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: DEEPSEEK_BASE_URL
+        sync: false
+      - key: DEEPSEEK_CHAT_MODEL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_BASE_URL
+        sync: false
+      - key: OPENAI_CHAT_MODEL
+        sync: false
+      - key: OPENAI_EMBEDDING_MODEL
+        sync: false
+      - key: NEXT_PUBLIC_BASE_URL
+        sync: false
