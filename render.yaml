@@ -10,7 +10,7 @@ services:
     runtime: node
     plan: free
     installCommand: npm install --include=dev
-    buildCommand: npm run build
+    buildCommand: npm install --include=dev && npm run build
     startCommand: npx next start -p $PORT
     healthCheckPath: /
     envVars:
