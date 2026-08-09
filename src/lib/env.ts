@@ -29,4 +29,7 @@ export const env = {
   get deepseekChatModel() {
     return process.env.DEEPSEEK_CHAT_MODEL ?? "deepseek-chat";
   },
+  get siteUrl() {
+    return process.env.NEXT_PUBLIC_SITE_URL;
+  },
 };

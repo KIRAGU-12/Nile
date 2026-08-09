@@ -1,10 +1,18 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { createRequestHandlerClient } from "@/lib/supabase/server";
+import { env } from "@/lib/env";
 
 export async function POST(request: NextRequest) {
   // After a full sign-out, land on the public welcome page ("/").
-  const response = NextResponse.redirect(new URL("/", request.url), 303);
+  // If NEXT_PUBLIC_SITE_URL is configured (the real deployed site), always go
+  // there so logout never ends up on a local/tunnel host. Otherwise stay on the
+  // same host the user is already on.
+  const siteUrl = env.siteUrl?.trim();
+  const response = NextResponse.redirect(
+    new URL("/", siteUrl || request.url),
+    303
+  );
   try {
     const supabase = createRequestHandlerClient(request, response);
     await supabase.auth.signOut();
