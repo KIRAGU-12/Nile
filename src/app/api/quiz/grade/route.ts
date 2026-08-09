@@ -73,11 +73,21 @@ export async function POST(req: Request) {
     const unitLabel = course ? `${course.code} — ${course.title}` : "this unit";
     const notes = course ? getUnitNotes(course.code) : null;
 
-    const chunks = retrieveRelevant(question, 6, courseCode);
+    // Question-focused retrieval is the primary reference for grading; the raw
+    // unit notes are added as a backup so the examiner always has full context
+    // (previously only the first 8,000 chars of the unit were available, which
+    // missed topics that appear deeper in the notes).
+    const chunks = retrieveRelevant(question, 8, courseCode);
     const retrieved = chunks
-      .map((c) => `[${c.courseCode} ${c.title}]: ${c.text}`)
+      .map(
+        (c) =>
+          `[${c.courseCode} ${c.title}${c.section ? ` · ${c.section}` : ""}]: ${c.text}`
+      )
       .join("\n\n");
-    const unitContext = notes ? notes.slice(0, 8000) : retrieved.slice(0, 8000);
+    const unitContext = (retrieved + "\n\n" + (notes ? notes.slice(0, 12000) : "")).slice(
+      0,
+      16000
+    );
 
     const userPrompt = `Unit: ${unitLabel}
 Question (${marks} ${marks === 1 ? "mark" : "marks"}): ${question}

@@ -66,9 +66,14 @@ export async function POST(req: Request) {
       ? `The student is currently viewing the unit ${course.code} — ${course.title} (Year ${course.year}, Semester ${course.semester}).\nUnit description: ${course.description}\nLearning outcomes: ${course.learningOutcomes.join("; ")}`
       : "";
 
-    const chunks = retrieveRelevant(question, 8, courseCode);
+    // Retrieve a generous, section-labelled context from the notes so Nile can
+    // answer accurately from the curriculum material.
+    const chunks = retrieveRelevant(question, 12, courseCode);
     const context = chunks
-      .map((c) => `- [${c.courseCode} ${c.title}]: ${c.text}`)
+      .map(
+        (c) =>
+          `- [${c.courseCode} ${c.title}${c.section ? ` · ${c.section}` : ""}]: ${c.text}`
+      )
       .join("\n\n");
 
     // Accept either a full `messages` history (preferred) or a single `question`.
@@ -99,7 +104,7 @@ export async function POST(req: Request) {
         ...finalMessages,
       ],
       temperature: 0.5,
-      max_tokens: 1600,
+      max_tokens: 2000,
     });
 
     const answer = completion.choices[0]?.message?.content ?? "";
