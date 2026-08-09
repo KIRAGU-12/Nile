@@ -11,6 +11,7 @@ import {
 } from "@/lib/curriculum/practice";
 import { retrieveRelevant } from "@/lib/ai/knowledge";
 import { generateUnitPdf } from "@/lib/pdf/generateUnitPdf";
+import { createSupabaseAdmin } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 
@@ -27,21 +28,83 @@ function categoryLabel(cat: PracticeQuestion["category"]): string {
 }
 
 /**
- * Generate a concise model answer for every practice question, grounded in the
- * unit notes. Uses DeepSeek (with one retry); any question the AI does not
- * answer is filled with the best matching excerpt from the notes, so the PDF
- * always has an answer for every question and never fails.
+ * Model answers, cached per unit so PDF downloads are fast after the first
+ * time. Checks an in-memory cache, then the unit_pdf_answers table (if it
+ * exists), and only calls DeepSeek when there is no cached copy yet. Any
+ * question the AI leaves unanswered is filled with the best matching excerpt
+ * from the notes, so the PDF always has an answer for every question.
  */
+const memCache = new Map<string, string[]>();
+
+async function readCachedAnswers(courseCode: string): Promise<string[] | null> {
+  if (memCache.has(courseCode)) return memCache.get(courseCode)!;
+  try {
+    const supabase = createSupabaseAdmin();
+    const { data } = await supabase
+      .from("unit_pdf_answers")
+      .select("answers")
+      .eq("course_code", courseCode)
+      .maybeSingle();
+    if (data && Array.isArray(data.answers)) {
+      const arr = data.answers as string[];
+      memCache.set(courseCode, arr);
+      return arr;
+    }
+  } catch (e) {
+    console.warn(
+      "[pdf] cache read skipped (unit_pdf_answers table may not exist yet)",
+      e
+    );
+  }
+  return null;
+}
+
+async function saveCachedAnswers(courseCode: string, answers: string[]) {
+  memCache.set(courseCode, answers);
+  try {
+    const supabase = createSupabaseAdmin();
+    await supabase
+      .from("unit_pdf_answers")
+      .upsert(
+        { course_code: courseCode, answers, updated_at: new Date().toISOString() },
+        { onConflict: "course_code" }
+      );
+  } catch (e) {
+    console.warn(
+      "[pdf] cache save skipped (unit_pdf_answers table may not exist yet)",
+      e
+    );
+  }
+}
+
+function fallbackAnswer(question: PracticeQuestion, courseCode: string): string {
+  const top = retrieveRelevant(question.text, 1, courseCode)[0];
+  if (top) {
+    const t = top.text.replace(/\s+/g, " ").trim();
+    return t.length > 240
+      ? `From the unit notes: ${t.slice(0, 240).trimEnd()}…`
+      : `From the unit notes: ${t}`;
+  }
+  return "See the Detailed notes section of this document for the model answer.";
+}
+
 async function generateAnswers(
   courseCode: string,
   questions: PracticeQuestion[]
 ): Promise<string[]> {
-  if (!env.deepseekKey || !questions.length) return questions.map(() => "");
+  if (!questions.length) return [];
+
+  const cached = await readCachedAnswers(courseCode);
+  if (cached && cached.length === questions.length) return cached;
+
+  if (!env.deepseekKey) {
+    return questions.map((q) => fallbackAnswer(q, courseCode));
+  }
 
   const notes = getUnitNotes(courseCode) ?? "";
   const retrievedText = retrieveRelevant(
     questions.map((q) => q.text).join(" "),
-    8,
+    6,
     courseCode
   )
     .map(
@@ -49,7 +112,7 @@ async function generateAnswers(
         `[${c.courseCode} ${c.title}${c.section ? ` · ${c.section}` : ""}]: ${c.text}`
     )
     .join("\n\n");
-  const context = (retrievedText + "\n\n" + notes.slice(0, 9000)).slice(0, 14000);
+  const context = (retrievedText + "\n\n" + notes.slice(0, 6000)).slice(0, 10000);
 
   const questionList = questions
     .map(
@@ -60,7 +123,7 @@ async function generateAnswers(
     )
     .join("\n");
 
-  const prompt = `Unit: ${courseCode}\n\nReference material from the unit notes (use ONLY this):\n${context}\n\nPractice questions:\n${questionList}\n\nWrite a concise model answer for EACH question, grounded in the notes above. Short answer / objective: 2–3 sentences. Essays: a short paragraph (3–5 sentences). Do not invent facts outside the notes. Respond with ONLY valid JSON, no markdown, in exactly this shape: {"answers":[{"index":0,"answer":"..."}]}`;
+  const prompt = `Unit: ${courseCode}\n\nNotes (use ONLY this):\n${context}\n\nQuestions:\n${questionList}\n\nWrite one short model answer per question (1–3 sentences for short/objective, 2–4 for essays), grounded in the notes. Respond with ONLY valid JSON, no markdown, in exactly this shape: {"answers":[{"index":0,"answer":"..."}]}`;
 
   const callAi = async (): Promise<string[]> => {
     const oa = new OpenAI({
@@ -73,15 +136,14 @@ async function generateAnswers(
         {
           role: "system",
           content:
-            "You are Nile, a tutor for the Bachelor of Education (Arts) in English and Literature programme at a Kenyan university. You write accurate, concise model answers using only the provided unit notes.",
+            "You are Nile, a tutor for the Bachelor of Education (Arts) in English and Literature programme at a Kenyan university. Write accurate, concise model answers using only the provided unit notes.",
         },
         { role: "user", content: prompt },
       ],
       temperature: 0.3,
-      max_tokens: 2500,
+      max_tokens: 1200,
       response_format: { type: "json_object" },
     });
-
     const raw = completion.choices[0]?.message?.content?.trim() ?? "";
     if (!raw) return questions.map(() => "");
     const parsed = JSON.parse(raw);
@@ -102,31 +164,22 @@ async function generateAnswers(
     return out;
   };
 
-  let answers: string[] = [];
+  let ai: string[] = [];
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      answers = await callAi();
+      ai = await callAi();
     } catch (e) {
       console.error(`[pdf] answer generation failed (attempt ${attempt})`, e);
     }
-    if (!answers.length) answers = questions.map(() => "");
-    if (answers.every((a) => a)) break;
+    if (!ai.length) ai = questions.map(() => "");
+    if (ai.every((a) => a)) break;
   }
 
-  // Fill any remaining gaps with the best matching excerpt from the notes.
-  const fallback = (q: PracticeQuestion): string => {
-    const top = retrieveRelevant(q.text, 1, courseCode)[0];
-    if (top) {
-      const t = top.text.replace(/\s+/g, " ").trim();
-      return t.length > 260
-        ? `From the unit notes: ${t.slice(0, 260).trimEnd()}…`
-        : `From the unit notes: ${t}`;
-    }
-    return "See the Detailed notes section of this document for the model answer.";
-  };
-  return answers.map((a, i) =>
-    a && a.trim() ? a.trim() : fallback(questions[i])
+  const answers = questions.map((q, i) =>
+    ai[i] && ai[i].trim() ? ai[i].trim() : fallbackAnswer(q, courseCode)
   );
+  await saveCachedAnswers(courseCode, answers);
+  return answers;
 }
 
 export async function GET(req: NextRequest) {

@@ -17,6 +17,9 @@ const COLOR = {
   answerBg: rgb(0.95, 0.965, 0.99),
 };
 
+// 1.5 line spacing (roughly size * 1.6) for readability.
+const LINE = 1.6;
+
 interface RichRun {
   text: string;
   bold: boolean;
@@ -157,10 +160,10 @@ function drawRichParagraph(
   text: string,
   opts: { size?: number; x?: number; color?: ReturnType<typeof rgb>; leading?: number; maxWidth?: number } = {}
 ): void {
-  const size = opts.size ?? 10.5;
+  const size = opts.size ?? 11;
   const x = opts.x ?? MARGIN;
   const color = opts.color ?? COLOR.text;
-  const leading = opts.leading ?? size * 1.45;
+  const leading = opts.leading ?? size * LINE;
   const maxWidth = opts.maxWidth ?? CONTENT_W - (x - MARGIN);
   const runs = tokenizeRich(text);
   const lines = wrapRuns(runs, maxWidth, size, c.font, c.bold);
@@ -202,56 +205,62 @@ function drawHeading(c: Cursor, text: string, level: 1 | 2 | 3): void {
 function drawBullet(c: Cursor, text: string): void {
   const indent = 14;
   const bulletW = 12;
-  const size = 10.5;
-  const leading = size * 1.45;
+  const size = 11;
+  const leading = size * LINE;
   const x = MARGIN + indent;
   const runs = tokenizeRich(text);
   const lines = wrapRuns(runs, CONTENT_W - indent - bulletW, size, c.font, c.bold);
-  ensure(c, leading * lines.length);
-  const dotY = c.y - size * 0.72;
-  c.page.drawCircle({ x: x - bulletW + 4, y: dotY, size: 1.8, color: COLOR.primary });
-  let cy = c.y;
+  let first = true;
   for (const line of lines) {
     ensure(c, leading);
+    if (first) {
+      c.page.drawCircle({
+        x: x - bulletW + 4,
+        y: c.y - size * 0.72,
+        size: 1.8,
+        color: COLOR.primary,
+      });
+      first = false;
+    }
     let cx = x;
     for (const run of line) {
       const font = run.bold ? c.bold : c.font;
-      c.page.drawText(run.text, { x: cx, y: cy - size, size, font, color: COLOR.text });
+      c.page.drawText(run.text, { x: cx, y: c.y - size, size, font, color: COLOR.text });
       cx += measure(run.text, font, size);
     }
-    cy -= leading;
+    c.y -= leading;
   }
-  c.y = cy;
 }
 
 function drawNumbered(c: Cursor, num: string, text: string): void {
   const indent = 14;
   const numW = 22;
-  const size = 10.5;
-  const leading = size * 1.45;
+  const size = 11;
+  const leading = size * LINE;
   const x = MARGIN + indent;
   const runs = tokenizeRich(text);
   const lines = wrapRuns(runs, CONTENT_W - indent - numW, size, c.font, c.bold);
-  ensure(c, leading * lines.length);
-  c.page.drawText(num + ".", {
-    x: MARGIN,
-    y: c.y - size,
-    size,
-    font: c.bold,
-    color: COLOR.primary,
-  });
-  let cy = c.y;
+  let first = true;
   for (const line of lines) {
     ensure(c, leading);
+    if (first) {
+      c.page.drawText(num + ".", {
+        x: MARGIN,
+        y: c.y - size,
+        size,
+        font: c.bold,
+        color: COLOR.primary,
+      });
+      first = false;
+    }
     let cx = x;
     for (const run of line) {
       const font = run.bold ? c.bold : c.font;
-      c.page.drawText(run.text, { x: cx, y: cy - size, size, font, color: COLOR.text });
+      c.page.drawText(run.text, { x: cx, y: c.y - size, size, font, color: COLOR.text });
       cx += measure(run.text, font, size);
     }
-    cy -= leading;
+    c.y -= leading;
   }
-  c.y = cy;
 }
 
 function drawDivider(c: Cursor): void {
@@ -335,9 +344,9 @@ export interface UnitPdfData {
 export async function generateUnitPdf(data: UnitPdfData): Promise<Uint8Array> {
   const { course, notes, questions, answers } = data;
   const doc = await PDFDocument.create();
-  const font = await doc.embedFont(StandardFonts.Helvetica);
-  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const italic = await doc.embedFont(StandardFonts.HelveticaOblique);
+  const font = await doc.embedFont(StandardFonts.TimesRoman);
+  const bold = await doc.embedFont(StandardFonts.TimesRomanBold);
+  const italic = await doc.embedFont(StandardFonts.TimesRomanItalic);
 
   const c: Cursor = { doc, page: null as unknown as PDFPage, y: PAGE_H - MARGIN, font, bold, italic, pageNumber: 0 };
   newPage(c);
@@ -466,23 +475,22 @@ export async function generateUnitPdf(data: UnitPdfData): Promise<Uint8Array> {
 }
 
 function drawAnswerBox(c: Cursor, text: string): void {
-  const size = 10;
-  const leading = size * 1.45;
+  const size = 10.5;
+  const leading = size * LINE;
   const runs = tokenizeRich(text);
   const lines = wrapRuns(runs, CONTENT_W - 20, size, c.font, c.bold);
-  const boxHeight = lines.length * leading + 14;
-  ensure(c, boxHeight + 6);
-  // background
+  const boxHeight = lines.length * leading + 16;
+  ensure(c, boxHeight + 4); // keep the whole box together on one page
+  const top = c.y;
   c.page.drawRectangle({
     x: MARGIN - 4,
-    y: c.y - boxHeight + 4,
+    y: top - boxHeight,
     width: CONTENT_W + 8,
     height: boxHeight,
     color: COLOR.answerBg,
   });
-  let cy = c.y - 9;
+  let cy = top - 10;
   for (const line of lines) {
-    ensure(c, leading);
     let cx = MARGIN + 6;
     for (const run of line) {
       const f = run.bold ? c.bold : c.font;
@@ -491,5 +499,5 @@ function drawAnswerBox(c: Cursor, text: string): void {
     }
     cy -= leading;
   }
-  c.y = cy - 6;
+  c.y = cy - 4;
 }

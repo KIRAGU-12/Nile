@@ -10,7 +10,8 @@ import ProgressToggle from "@/components/ProgressToggle";
 import AgentChat from "@/components/AgentChat";
 import UnitIntro from "@/components/UnitIntro";
 import UnitQuiz from "@/components/UnitQuiz";
-import { ArrowLeft, BookOpen, Download } from "lucide-react";
+import DownloadPdfButton from "@/components/DownloadPdfButton";
+import { ArrowLeft, BookOpen } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -82,14 +83,9 @@ export default async function CoursePage({
           Year {course.year}, Semester {course.semester} · {course.credits} credits
         </p>
         <div className="not-prose mt-4 flex flex-wrap items-center gap-3">
-          <a
-            href={`/api/unit/pdf?code=${code}`}
-            className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary-hover"
-          >
-            <Download size={16} /> Download unit PDF
-          </a>
+          <DownloadPdfButton code={code} />
           <span className="text-xs text-slate-500 dark:text-slate-400">
-            Full notes + practice questions with model answers (PDF)
+            Full notes (5–8 pages) + practice questions with model answers
           </span>
         </div>
       </header>

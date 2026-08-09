@@ -8,8 +8,16 @@ if (!connectionString) {
   process.exit(1);
 }
 
-const file = path.join(process.cwd(), "supabase", "migrations", "20240101000000_init_schema.sql");
-const sql = fs.readFileSync(file, "utf-8");
+const dir = path.join(process.cwd(), "supabase", "migrations");
+const files = fs
+  .readdirSync(dir)
+  .filter((f) => f.endsWith(".sql"))
+  .sort();
+
+if (!files.length) {
+  console.error("No migration files found in", dir);
+  process.exit(1);
+}
 
 const client = new pg.Client({
   connectionString,
@@ -18,10 +26,14 @@ const client = new pg.Client({
 
 client
   .connect()
-  .then(() => client.query(sql))
-  .then(() => {
+  .then(async () => {
+    for (const f of files) {
+      const sql = fs.readFileSync(path.join(dir, f), "utf-8");
+      await client.query(sql);
+      console.log("Applied", f);
+    }
     console.log("Supabase schema migrated successfully.");
-    return client.end();
+    await client.end();
   })
   .catch((e) => {
     console.error("Migration failed:", e.message);
