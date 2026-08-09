@@ -41,6 +41,7 @@ interface Cursor {
   bold: PDFFont;
   italic: PDFFont;
   pageNumber: number;
+  footerDrawn: boolean;
 }
 
 /**
@@ -134,6 +135,7 @@ function newPage(c: Cursor): void {
   c.page = c.doc.addPage([PAGE_W, PAGE_H]);
   c.y = PAGE_H - MARGIN;
   c.pageNumber++;
+  c.footerDrawn = false;
 }
 
 function ensure(c: Cursor, needed: number): void {
@@ -144,6 +146,7 @@ function ensure(c: Cursor, needed: number): void {
 }
 
 function drawFooter(c: Cursor): void {
+  c.footerDrawn = true;
   const label = `Nile — English & Literature study notes · Page ${c.pageNumber}`;
   const w = measure(label, c.font, 8);
   c.page.drawText(label, {
@@ -348,7 +351,7 @@ export async function generateUnitPdf(data: UnitPdfData): Promise<Uint8Array> {
   const bold = await doc.embedFont(StandardFonts.TimesRomanBold);
   const italic = await doc.embedFont(StandardFonts.TimesRomanItalic);
 
-  const c: Cursor = { doc, page: null as unknown as PDFPage, y: PAGE_H - MARGIN, font, bold, italic, pageNumber: 0 };
+  const c: Cursor = { doc, page: null as unknown as PDFPage, y: PAGE_H - MARGIN, font, bold, italic, pageNumber: 0, footerDrawn: false };
   newPage(c);
 
   // ---------- Title block ----------
@@ -430,16 +433,30 @@ export async function generateUnitPdf(data: UnitPdfData): Promise<Uint8Array> {
     drawRichParagraph(c, "No practice questions were provided for this unit.");
   } else {
     const cats: PracticeQuestion["category"][] = ["short", "essay", "objective"];
-    let global = 0;
+    let parentNum = 0; // sequential number for top-level (non-sub) questions
+    let subLetter = 0;
+    let lastParent: string | undefined;
     for (const cat of cats) {
       const group = questions.filter((q) => q.category === cat);
       if (!group.length) continue;
       drawHeading(c, categoryLabel(cat), 2);
       for (const q of group) {
-        global++;
-        const label = q.parent ? `${q.parent}` : `${global}`;
         const marks = q.marks ? ` (${q.marks} marks)` : "";
-        drawNumbered(c, label, `${q.text}${marks}`);
+        if (q.parent) {
+          // Sub-question (a., b., c.) under a numbered parent item — use a short
+          // letter label instead of repeating the full parent text as the number
+          // (which used to overlap the question text). Restart the letters when
+          // a new parent passage begins.
+          if (q.parent !== lastParent) subLetter = 0;
+          subLetter++;
+          drawNumbered(c, String.fromCharCode(96 + subLetter), `${q.text}${marks}`);
+          lastParent = q.parent;
+        } else {
+          parentNum++;
+          subLetter = 0;
+          lastParent = undefined;
+          drawNumbered(c, String(parentNum), `${q.text}${marks}`);
+        }
       }
       c.y -= 6;
     }
@@ -457,19 +474,29 @@ export async function generateUnitPdf(data: UnitPdfData): Promise<Uint8Array> {
   if (!questions.length || !answers.length) {
     drawRichParagraph(c, "Model answers are not available for this unit.");
   } else {
+    let subLetter = 0;
+    let lastParent: string | undefined;
     questions.forEach((q, i) => {
       const ans = answers[i]?.trim();
       if (!ans) return;
-      const qLabel = q.parent ? `Q${i + 1} (${q.parent})` : `Q${i + 1}`;
       const marks = q.marks ? ` — ${q.marks} marks` : "";
-      drawHeading(c, `${qLabel}${marks}`, 3);
+      if (q.parent) {
+        if (q.parent !== lastParent) subLetter = 0;
+        subLetter++;
+        drawHeading(c, `Q${i + 1} (${String.fromCharCode(96 + subLetter)})${marks}`, 3);
+        lastParent = q.parent;
+      } else {
+        subLetter = 0;
+        lastParent = undefined;
+        drawHeading(c, `Q${i + 1}${marks}`, 3);
+      }
       drawRichParagraph(c, q.text, { size: 9.5, color: COLOR.muted });
       drawAnswerBox(c, ans);
       c.y -= 6;
     });
   }
 
-  drawFooter(c);
+  if (!c.footerDrawn) drawFooter(c);
 
   return doc.save();
 }
