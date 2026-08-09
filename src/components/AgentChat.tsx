@@ -10,7 +10,6 @@ import {
   Maximize2,
   Plus,
   Clock,
-  History,
   MoreVertical,
   Trash2,
   AlertTriangle,
@@ -265,6 +264,7 @@ export default function AgentChat({ fullPage = false, courseCode, trigger }: Age
   const [open, setOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   // Always open Nile on a fresh chat (previous chats stay saved in history).
@@ -369,16 +369,61 @@ export default function AgentChat({ fullPage = false, courseCode, trigger }: Age
 
   if (fullPage) {
     return (
-      <div className="flex h-[calc(100dvh-13rem)] max-h-[calc(100dvh-13rem)] flex-col">
-        <div className="flex flex-1 overflow-hidden">
-          <HistorySidebar
-            sessions={sessions}
-            activeId={activeId}
-            onOpen={switchToChat}
-            onNew={startNewChat}
-            onDelete={deleteChatHandler}
-          />
-          <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex h-[calc(100dvh-13rem)] max-h-[calc(100dvh-13rem)] flex-col overflow-hidden">
+        {/* Header sits just below the page's "Nile" word; the three-dot button in
+            the top corner shows/hides the previous chats. */}
+        <div className="flex shrink-0 items-center justify-end rounded-t-lg border-b bg-slate-50 px-3 py-1.5 dark:bg-slate-900">
+          <button
+            onClick={() => setSidebarOpen((s) => !s)}
+            className="rounded p-1.5 text-slate-500 hover:bg-slate-200 dark:text-slate-400 dark:hover:bg-slate-700"
+            aria-label="Past chats"
+            title="Past chats"
+          >
+            <MoreVertical size={18} />
+          </button>
+        </div>
+
+        <div className="relative flex min-h-0 flex-1 overflow-hidden">
+          {/* Desktop: the past-chats list is always visible on the left. */}
+          <div className="hidden shrink-0 lg:block">
+            <HistorySidebar
+              sessions={sessions}
+              activeId={activeId}
+              onOpen={switchToChat}
+              onNew={startNewChat}
+              onDelete={deleteChatHandler}
+            />
+          </div>
+
+          {/* Mobile/tablet: past chats appear in a slide-in panel toggled by the
+              three-dot button, so the chat + type bar keep the full width. */}
+          {sidebarOpen && (
+            <div
+              className="absolute inset-0 z-20 flex bg-black/40 lg:hidden"
+              onClick={() => setSidebarOpen(false)}
+            >
+              <div
+                className="h-full w-64 max-w-[80%]"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <HistorySidebar
+                  sessions={sessions}
+                  activeId={activeId}
+                  onOpen={(id) => {
+                    switchToChat(id);
+                    setSidebarOpen(false);
+                  }}
+                  onNew={() => {
+                    startNewChat();
+                    setSidebarOpen(false);
+                  }}
+                  onDelete={deleteChatHandler}
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
             {chatBody}
             {chatInput}
           </div>
@@ -408,7 +453,7 @@ export default function AgentChat({ fullPage = false, courseCode, trigger }: Age
             <div className="flex items-center justify-between rounded-t-2xl border-b bg-slate-50 px-4 py-2 dark:bg-slate-900">
               <div className="flex items-center gap-2">
                 <Bot size={18} className="text-primary" />
-                <span className="font-medium">Nile Assistant</span>
+                <span className="font-medium">Nile</span>
               </div>
               <div className="flex items-center gap-1">
                 <button
@@ -420,7 +465,7 @@ export default function AgentChat({ fullPage = false, courseCode, trigger }: Age
                   aria-label="Past chats"
                   title="Past chats"
                 >
-                  <History size={14} />
+                  <MoreVertical size={15} />
                 </button>
                 <button
                   onClick={() => setCollapsed(!collapsed)}
