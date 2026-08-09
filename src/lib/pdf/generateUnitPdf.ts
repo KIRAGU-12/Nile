@@ -40,13 +40,38 @@ interface Cursor {
   pageNumber: number;
 }
 
+/**
+ * pdf-lib's built-in Helvetica only supports the WinAnsi (Latin-1) charset, so
+ * characters like ū, ĩ, →, ‑ or − crash font.encodeText. Sanitise every string
+ * before drawing: decompose accents, map common symbols to ASCII, and drop any
+ * remaining non-Latin-1 character.
+ */
+function sanitizeForPdf(text: string): string {
+  return text
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[→←]/g, (m) => (m === "→" ? "->" : "<-"))
+    .replace(/[–—]/g, "-")
+    .replace(/[‐‑‒]/g, "-")
+    .replace(/[−]/g, "-")
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/[…]/g, "...")
+    .replace(/[•]/g, "-")
+    .replace(/[œ]/g, "oe")
+    .replace(/[Œ]/g, "OE")
+    .replace(/[^\x00-\u00FF]/g, "");
+}
+
 function tokenizeRich(text: string): RichRun[] {
-  const cleaned = text
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-    .replace(/`/g, "")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">");
+  const cleaned = sanitizeForPdf(
+    text
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+      .replace(/`/g, "")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+  );
   const parts = cleaned.split(/\*\*(.+?)\*\*/g);
   const out: RichRun[] = [];
   for (let i = 0; i < parts.length; i++) {

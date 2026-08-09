@@ -28,42 +28,41 @@ function categoryLabel(cat: PracticeQuestion["category"]): string {
 
 /**
  * Generate a concise model answer for every practice question, grounded in the
- * unit notes. Uses one DeepSeek call; returns an array parallel to `questions`.
- * On any failure it returns empty strings so the PDF still builds (answers then
- * fall back to a "see the notes" note).
+ * unit notes. Uses DeepSeek (with one retry); any question the AI does not
+ * answer is filled with the best matching excerpt from the notes, so the PDF
+ * always has an answer for every question and never fails.
  */
 async function generateAnswers(
   courseCode: string,
   questions: PracticeQuestion[]
 ): Promise<string[]> {
-  const empty = questions.map(() => "");
-  if (!env.deepseekKey || !questions.length) return empty;
+  if (!env.deepseekKey || !questions.length) return questions.map(() => "");
 
-  try {
-    const notes = getUnitNotes(courseCode) ?? "";
-    const retrieved = retrieveRelevant(
-      questions.map((q) => q.text).join(" "),
-      8,
-      courseCode
+  const notes = getUnitNotes(courseCode) ?? "";
+  const retrievedText = retrieveRelevant(
+    questions.map((q) => q.text).join(" "),
+    8,
+    courseCode
+  )
+    .map(
+      (c) =>
+        `[${c.courseCode} ${c.title}${c.section ? ` · ${c.section}` : ""}]: ${c.text}`
     )
-      .map(
-        (c) =>
-          `[${c.courseCode} ${c.title}${c.section ? ` · ${c.section}` : ""}]: ${c.text}`
-      )
-      .join("\n\n");
-    const context = (retrieved + "\n\n" + notes.slice(0, 12000)).slice(0, 16000);
+    .join("\n\n");
+  const context = (retrievedText + "\n\n" + notes.slice(0, 9000)).slice(0, 14000);
 
-    const questionList = questions
-      .map(
-        (q, i) =>
-          `${i + 1}. [${categoryLabel(q.category)}] ${q.text}${
-            q.marks ? ` (${q.marks} marks)` : ""
-          }`
-      )
-      .join("\n");
+  const questionList = questions
+    .map(
+      (q, i) =>
+        `${i + 1}. [${categoryLabel(q.category)}] ${q.text}${
+          q.marks ? ` (${q.marks} marks)` : ""
+        }`
+    )
+    .join("\n");
 
-    const prompt = `Unit: ${courseCode}\n\nReference material from the unit notes (use ONLY this):\n${context}\n\nPractice questions:\n${questionList}\n\nWrite a concise model answer for EACH question, grounded in the notes above. Short answer / objective: 2–3 sentences. Essays: a short paragraph (3–5 sentences) hitting the key points. Do not invent facts outside the notes. Respond with ONLY valid JSON, no markdown, in exactly this shape: {"answers":[{"index":0,"answer":"..."}]}`;
+  const prompt = `Unit: ${courseCode}\n\nReference material from the unit notes (use ONLY this):\n${context}\n\nPractice questions:\n${questionList}\n\nWrite a concise model answer for EACH question, grounded in the notes above. Short answer / objective: 2–3 sentences. Essays: a short paragraph (3–5 sentences). Do not invent facts outside the notes. Respond with ONLY valid JSON, no markdown, in exactly this shape: {"answers":[{"index":0,"answer":"..."}]}`;
 
+  const callAi = async (): Promise<string[]> => {
     const oa = new OpenAI({
       apiKey: env.deepseekKey,
       baseURL: normalizeBaseUrl(env.deepseekBaseUrl),
@@ -79,11 +78,12 @@ async function generateAnswers(
         { role: "user", content: prompt },
       ],
       temperature: 0.3,
-      max_tokens: 4000,
+      max_tokens: 2500,
       response_format: { type: "json_object" },
     });
 
-    const raw = completion.choices[0]?.message?.content ?? "{}";
+    const raw = completion.choices[0]?.message?.content?.trim() ?? "";
+    if (!raw) return questions.map(() => "");
     const parsed = JSON.parse(raw);
     const arr = Array.isArray(parsed.answers) ? parsed.answers : [];
     const out = questions.map(() => "");
@@ -100,10 +100,33 @@ async function generateAnswers(
       }
     }
     return out;
-  } catch (e) {
-    console.error("[pdf] answer generation failed", e);
-    return empty;
+  };
+
+  let answers: string[] = [];
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      answers = await callAi();
+    } catch (e) {
+      console.error(`[pdf] answer generation failed (attempt ${attempt})`, e);
+    }
+    if (!answers.length) answers = questions.map(() => "");
+    if (answers.every((a) => a)) break;
   }
+
+  // Fill any remaining gaps with the best matching excerpt from the notes.
+  const fallback = (q: PracticeQuestion): string => {
+    const top = retrieveRelevant(q.text, 1, courseCode)[0];
+    if (top) {
+      const t = top.text.replace(/\s+/g, " ").trim();
+      return t.length > 260
+        ? `From the unit notes: ${t.slice(0, 260).trimEnd()}…`
+        : `From the unit notes: ${t}`;
+    }
+    return "See the Detailed notes section of this document for the model answer.";
+  };
+  return answers.map((a, i) =>
+    a && a.trim() ? a.trim() : fallback(questions[i])
+  );
 }
 
 export async function GET(req: NextRequest) {
