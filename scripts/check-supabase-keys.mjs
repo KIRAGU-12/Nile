@@ -13,6 +13,7 @@ const envPath = path.join(__dirname, "..", ".env.local");
 function readEnv(name) {
   if (!existsSync(envPath)) return "";
   const line = readFileSync(envPath, "utf-8")
+    .replace(/^\uFEFF/, "") // strip UTF-8 BOM if present
     .split(/\r?\n/)
     .find((l) => l.startsWith(name + "="));
   return line ? line.slice(name.length + 1).trim() : "";
@@ -28,8 +29,14 @@ async function test(label, key) {
     return;
   }
   try {
-    const res = await fetch(`${url}/rest/v1/`, {
-      headers: { apikey: key, Authorization: `Bearer ${key}` },
+    // Use a real table query (the root /rest/v1/ endpoint returns 401 for the
+    // new sb_publishable_ keys even when they are valid — false negative).
+    const res = await fetch(`${url}/rest/v1/profiles?select=id&limit=1`, {
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${key}`,
+        Accept: "application/json",
+      },
     });
     if (res.status === 200) console.log(`${label}: VALID (HTTP 200)`);
     else console.log(`${label}: INVALID (HTTP ${res.status})`);
